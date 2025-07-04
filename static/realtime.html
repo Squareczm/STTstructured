@@ -20,7 +20,7 @@
         <button id="recordButton" aria-label="Start Recording"></button>
         <div class="button-container">
             <button id="readabilityButton" class="action-button">可读性整理</button>
-            <button id="correctnessButton" class="action-button">一句话要点</button>
+            <button id="correctnessButton" class="action-button">给我点启发</button>
         </div>
         <div class="main-content">
             <div class="transcript-container">
@@ -43,12 +43,19 @@
             </div>
             <div class="settings-body">
                 <div class="setting-group">
+                    <label for="llmModelSelect">大模型选择：</label>
+                    <select id="llmModelSelect">
+                        <option value="deepseek-chat">DeepSeek Chat</option>
+                        <option value="deepseek-reasoner">DeepSeek Reasoner</option>
+                    </select>
+                </div>
+                <div class="setting-group">
                     <label for="readabilityPrompt">可读性整理提示词：</label>
                     <textarea id="readabilityPrompt" placeholder="请输入用于文本可读性优化的提示词..."></textarea>
                 </div>
                 <div class="setting-group">
-                    <label for="correctnessPrompt">一句话要点提示词：</label>
-                    <textarea id="correctnessPrompt" placeholder="请输入用于生成一句话要点的提示词..."></textarea>
+                    <label for="correctnessPrompt">给我点启发提示词：</label>
+                    <textarea id="correctnessPrompt" placeholder="请输入用于激发灵感的提示词..."></textarea>
                 </div>
             </div>
             <div class="settings-footer">

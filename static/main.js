@@ -23,6 +23,7 @@ const saveSettings = document.getElementById('saveSettings');
 const resetPrompts = document.getElementById('resetPrompts');
 const readabilityPrompt = document.getElementById('readabilityPrompt');
 const correctnessPrompt = document.getElementById('correctnessPrompt');
+const llmModelSelect = document.getElementById('llmModelSelect');
 
 // Configuration
 const targetSeconds = 5;
@@ -244,20 +245,23 @@ document.addEventListener('keydown', (event) => {
 // Settings management
 function loadPrompts() {
     const defaultReadabilityPrompt = "这是一个语音转文字的文本，可能有识别不清和语义不明。请你理解文字背后的意思和意图，并对文本进行优化，使其更加清晰易读，结构明确。注意，保持原意不变，不用写你的整理思路和建议，直接输出你的整理结果，不要有任何其他多余的内容，比如“以下是整理后的内容”类似这种多余的话：";
-    const defaultCorrectnessPrompt = "这是一个语音转文字的文本，可能有识别不清和语义不明。请你理解文字背后的意思和意图，并对文本进行一句话总结，大约30-60字，你自己把握，要求精炼要点。注意，保持原意不变，不用写你的整理思路和建议，直接输出你的整理结果，不要有任何其他多余的内容：";
+    const defaultCorrectnessPrompt = "你是一位AI助手，擅长沟通，并能提供深刻见解。\n\n当你阅读用户提供的文本时，请务必透彻地理解其内容，并使用与用户输入相同的语言进行回复。\n\n* 如果内容是提问，请做出富有洞察力和深度的回答。\n* 如果内容是陈述，请从以下两个方面思考：\n\n    第一，如何延伸话题，增强其深度与说服力？请注意，一段有说服力的好文本，需要有自然且环环相扣的逻辑，以及直观清晰的联系或对比。这样才能构建出一种能引发读者理解与共鸣的阅读体验。\n\n    第二，能否针对用户的观点，提出一个激发思考的挑战？\n\n你的回答无需详尽或过于细节，核心目标是启发思考，并能轻松有效地打动读者。请大胆采用出人意料且富有创意的角度。\n\n请用简体中文回复。";
     
     readabilityPrompt.value = localStorage.getItem('readabilityPrompt') || defaultReadabilityPrompt;
     correctnessPrompt.value = localStorage.getItem('correctnessPrompt') || defaultCorrectnessPrompt;
+    // Load model selection
+    llmModelSelect.value = localStorage.getItem('llmModel') || 'deepseek-chat';
 }
 
 function savePrompts() {
     localStorage.setItem('readabilityPrompt', readabilityPrompt.value);
     localStorage.setItem('correctnessPrompt', correctnessPrompt.value);
+    localStorage.setItem('llmModel', llmModelSelect.value);
 }
 
 function resetPromptsToDefault() {
     const defaultReadabilityPrompt = "这是一个语音转文字的文本，可能有识别不清和语义不明。请你理解文字背后的意思和意图，并对文本进行优化，使其更加清晰易读，结构明确。注意，保持原意不变，不用写你的整理思路和建议，直接输出你的整理结果，不要有任何其他多余的内容，比如“以下是整理后的内容”类似这种多余的话：";
-    const defaultCorrectnessPrompt = "这是一个语音转文字的文本，可能有识别不清和语义不明。请你理解文字背后的意思和意图，并对文本进行一句话总结，大约30-60字，你自己把握，要求精炼要点。注意，保持原意不变，不用写你的整理思路和建议，直接输出你的整理结果，不要有任何其他多余的内容：";
+    const defaultCorrectnessPrompt = "你是一位AI助手，擅长沟通，并能提供深刻见解。\n\n当你阅读用户提供的文本时，请务必透彻地理解其内容，并使用与用户输入相同的语言进行回复。\n\n* 如果内容是提问，请做出富有洞察力和深度的回答。\n* 如果内容是陈述，请从以下两个方面思考：\n\n    第一，如何延伸话题，增强其深度与说服力？请注意，一段有说服力的好文本，需要有自然且环环相扣的逻辑，以及直观清晰的联系或对比。这样才能构建出一种能引发读者理解与共鸣的阅读体验。\n\n    第二，能否针对用户的观点，提出一个激发思考的挑战？\n\n你的回答无需详尽或过于细节，核心目标是启发思考，并能轻松有效地打动读者。请大胆采用出人意料且富有创意的角度。\n\n请用简体中文回复。";
     
     readabilityPrompt.value = defaultReadabilityPrompt;
     correctnessPrompt.value = defaultCorrectnessPrompt;
@@ -315,7 +319,8 @@ readabilityButton.onclick = async () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 text: inputText,
-                prompt: customPrompt
+                prompt: customPrompt,
+                model: localStorage.getItem('llmModel') || 'deepseek-chat'
             })
         });
 
@@ -349,23 +354,24 @@ correctnessButton.onclick = async () => {
     startTimer();
     const inputText = transcript.value.trim();
     if (!inputText) {
-        alert('请输入文本以生成一句话要点。');
+        alert('请输入文本以获得启发。');
         stopTimer();
         return;
     }
 
     try {
-        const customPrompt = localStorage.getItem('correctnessPrompt') || "这是一个语音转文字的文本，可能有识别不清和语义不明。请你理解文字背后的意思和意图，并对文本进行一句话总结，大约30-60字，你自己把握，要求精炼要点。注意，保持原意不变，不用写你的整理思路和建议，直接输出你的整理结果，不要有任何其他多余的内容：";
+        const customPrompt = localStorage.getItem('correctnessPrompt') || "你是一位AI助手，擅长沟通，并能提供深刻见解。\n\n当你阅读用户提供的文本时，请务必透彻地理解其内容，并使用与用户输入相同的语言进行回复。\n\n* 如果内容是提问，请做出富有洞察力和深度的回答。\n* 如果内容是陈述，请从以下两个方面思考：\n\n    第一，如何延伸话题，增强其深度与说服力？请注意，一段有说服力的好文本，需要有自然且环环相扣的逻辑，以及直观清晰的联系或对比。这样才能构建出一种能引发读者理解与共鸣的阅读体验。\n\n    第二，能否针对用户的观点，提出一个激发思考的挑战？\n\n你的回答无需详尽或过于细节，核心目标是启发思考，并能轻松有效地打动读者。请大胆采用出人意料且富有创意的角度。\n\n请用简体中文回复。";
         const response = await fetch('/api/v1/correctness', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 text: inputText,
-                prompt: customPrompt
+                prompt: customPrompt,
+                model: localStorage.getItem('llmModel') || 'deepseek-chat'
             })
         });
 
-        if (!response.ok) throw new Error('生成一句话要点失败');
+        if (!response.ok) throw new Error('生成启发失败');
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -384,7 +390,7 @@ correctnessButton.onclick = async () => {
 
     } catch (error) {
         console.error('Error:', error);
-        alert('生成一句话要点时发生错误');
+        alert('生成启发时发生错误');
         stopTimer();
     }
 };

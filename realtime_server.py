@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 class ReadabilityRequest(BaseModel):
     text: str = Field(..., description="The text to improve readability for.")
     prompt: Optional[str] = Field(None, description="Custom prompt for readability enhancement.")
+    model: Optional[str] = Field(None, description="LLM model name, e.g. 'deepseek-chat' or 'deepseek-reasoner'.")
 
 class ReadabilityResponse(BaseModel):
     enhanced_text: str = Field(..., description="The text with improved readability.")
@@ -38,12 +39,14 @@ class ReadabilityResponse(BaseModel):
 class CorrectnessRequest(BaseModel):
     text: str = Field(..., description="The text to check for factual correctness.")
     prompt: Optional[str] = Field(None, description="Custom prompt for correctness checking.")
+    model: Optional[str] = Field(None, description="LLM model name, e.g. 'deepseek-chat' or 'deepseek-reasoner'.")
 
 class CorrectnessResponse(BaseModel):
     analysis: str = Field(..., description="The factual correctness analysis.")
 
 class AskAIRequest(BaseModel):
     text: str = Field(..., description="The question to ask AI.")
+    model: Optional[str] = Field(None, description="LLM model name, e.g. 'deepseek-chat' or 'deepseek-reasoner'.")
 
 class AskAIResponse(BaseModel):
     answer: str = Field(..., description="AI's answer to the question.")
@@ -257,8 +260,8 @@ async def websocket_endpoint(websocket: WebSocket):
 async def enhance_readability(request: ReadabilityRequest):
     try:
         async def text_generator():
-            # Use deepseek-chat specifically for readability
-            processor = get_llm_processor("deepseek-chat")
+            model_name = request.model or "deepseek-chat"
+            processor = get_llm_processor(model_name)
             # Use custom prompt if provided, otherwise use default
             prompt = request.prompt or PROMPTS['readability-enhance']
             async for chunk in processor.process_text(request.text, prompt):
@@ -277,7 +280,8 @@ async def enhance_readability(request: ReadabilityRequest):
 )
 def ask_ai(request: AskAIRequest):
     try:
-        processor = get_llm_processor("deepseek-chat")
+        model_name = request.model or "deepseek-chat"
+        processor = get_llm_processor(model_name)
         answer = processor.process_text_sync(request.text, PROMPTS['paraphrase-gpt-realtime'])
         return AskAIResponse(answer=answer)
     except Exception as e:
@@ -293,8 +297,8 @@ def ask_ai(request: AskAIRequest):
 async def check_correctness(request: CorrectnessRequest):
     try:
         async def text_generator():
-            # Specifically use deepseek-chat for correctness checking
-            processor = get_llm_processor("deepseek-chat")
+            model_name = request.model or "deepseek-chat"
+            processor = get_llm_processor(model_name)
             # Use custom prompt if provided, otherwise use default
             prompt = request.prompt or PROMPTS['correctness-check']
             async for chunk in processor.process_text(request.text, prompt):

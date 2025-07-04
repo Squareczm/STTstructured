@@ -273,6 +273,36 @@ body.dark-theme textarea:focus {
     box-shadow: 0 0 0 3px rgba(10,132,255,0.25);
 }
 
+/* 美化下拉框，与文本区域视觉一致 */
+.setting-group select {
+    width: 100%;
+    padding: var(--spacing-md);
+    border: 1px solid #e5e5e5;
+    border-radius: var(--radius-lg);
+    background: var(--secondary-bg-light);
+    color: var(--text-primary-light);
+    font-size: 1rem;
+    font-family: inherit;
+    transition: var(--transition-smooth);
+}
+
+body.dark-theme .setting-group select {
+    background: var(--secondary-bg-dark);
+    color: var(--text-primary-dark);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.setting-group select:focus {
+    outline: none;
+    border-color: var(--action-blue);
+    box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1);
+}
+
+body.dark-theme .setting-group select:focus {
+    border-color: var(--action-blue-dark);
+    box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.25);
+}
+
 /* ===== 复制按钮 ===== */
 .copy-button {
     position: absolute;
