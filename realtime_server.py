@@ -8,16 +8,17 @@ from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 import uvicorn
 import logging
 from prompts import PROMPTS
-from openai_realtime_client import OpenAIRealtimeAudioTextClient
+from tencent_asr_client import TencentASRClient # Replaced OpenAI client
 from starlette.websockets import WebSocketState
 import wave
 import datetime
 import scipy.signal
 from openai import OpenAI, AsyncOpenAI
 from pydantic import BaseModel, Field
-from typing import Generator
+from typing import Generator, Optional
 from llm_processor import get_llm_processor
 from datetime import datetime, timedelta
+import websockets.exceptions
 
 # Configure logging
 logging.basicConfig(
@@ -29,12 +30,14 @@ logger = logging.getLogger(__name__)
 # Pydantic models for request and response schemas
 class ReadabilityRequest(BaseModel):
     text: str = Field(..., description="The text to improve readability for.")
+    prompt: Optional[str] = Field(None, description="Custom prompt for readability enhancement.")
 
 class ReadabilityResponse(BaseModel):
     enhanced_text: str = Field(..., description="The text with improved readability.")
 
 class CorrectnessRequest(BaseModel):
     text: str = Field(..., description="The text to check for factual correctness.")
+    prompt: Optional[str] = Field(None, description="Custom prompt for correctness checking.")
 
 class CorrectnessResponse(BaseModel):
     analysis: str = Field(..., description="The factual correctness analysis.")
@@ -47,13 +50,19 @@ class AskAIResponse(BaseModel):
 
 app = FastAPI()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    logger.error("OPENAI_API_KEY is not set in environment variables.")
-    raise EnvironmentError("OPENAI_API_KEY is not set.")
+# --- Environment Variable Configuration ---
+TENCENT_APP_ID = os.getenv("TENCENT_APP_ID")
+TENCENT_SECRET_ID = os.getenv("TENCENT_SECRET_ID")
+TENCENT_SECRET_KEY = os.getenv("TENCENT_SECRET_KEY")
 
-# Initialize with a default model
-llm_processor = get_llm_processor("gpt-4o")  # Default processor
+if not all([TENCENT_APP_ID, TENCENT_SECRET_ID, TENCENT_SECRET_KEY]):
+    error_msg = "Tencent Cloud API credentials (TENCENT_APP_ID, TENCENT_SECRET_ID, TENCENT_SECRET_KEY) are not set in environment variables."
+    logger.error(error_msg)
+    raise EnvironmentError(error_msg)
+
+
+# Initialize with DeepSeek as the default LLM
+llm_processor = get_llm_processor("deepseek-chat")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -62,7 +71,7 @@ async def get_realtime_page(request: Request):
     return FileResponse("static/realtime.html")
 
 class AudioProcessor:
-    def __init__(self, target_sample_rate=24000):
+    def __init__(self, target_sample_rate=16000): # Changed to 16kHz for Tencent ASR
         self.target_sample_rate = target_sample_rate
         self.source_sample_rate = 48000  # Most common sample rate for microphones
         
@@ -73,7 +82,7 @@ class AudioProcessor:
         # Convert to float32 for better precision during resampling
         float_data = pcm_data.astype(np.float32) / 32768.0
         
-        # Resample from 48kHz to 24kHz
+        # Resample from 48kHz to 16kHz
         resampled_data = scipy.signal.resample_poly(
             float_data, 
             self.target_sample_rate, 
@@ -98,113 +107,99 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     logger.info("WebSocket connection accepted")
     
-    # Add initial status update here
     await websocket.send_text(json.dumps({
         "type": "status",
-        "status": "idle"  # Set initial status to idle (blue)
+        "status": "idle"
     }))
     
-    client = None
+    client: TencentASRClient = None
     audio_processor = AudioProcessor()
-    audio_buffer = []
     recording_stopped = asyncio.Event()
-    openai_ready = asyncio.Event()
-    pending_audio_chunks = []
+    asr_ready = asyncio.Event()
+    pending_audio_chunks = [] # Buffer for audio chunks before ASR is ready
     
-    async def initialize_openai():
+    async def initialize_asr():
         nonlocal client
         try:
-            # Clear the ready flag while initializing
-            openai_ready.clear()
+            asr_ready.clear()
             
-            client = OpenAIRealtimeAudioTextClient(os.getenv("OPENAI_API_KEY"))
+            client = TencentASRClient(
+                app_id=TENCENT_APP_ID,
+                secret_id=TENCENT_SECRET_ID,
+                secret_key=TENCENT_SECRET_KEY
+            )
+            
+            # Register handlers for Tencent ASR events BEFORE connecting
+            client.register_handler("on_result", handle_asr_result)
+            client.register_handler("on_error", handle_asr_error)
+            client.register_handler("on_close", handle_asr_close)
+            
             await client.connect()
-            logger.info("Successfully connected to OpenAI client")
+            logger.info("Successfully connected to Tencent ASR client")
             
-            # Register handlers after client is initialized
-            client.register_handler("session.updated", lambda data: handle_generic_event("session.updated", data))
-            client.register_handler("input_audio_buffer.cleared", lambda data: handle_generic_event("input_audio_buffer.cleared", data))
-            client.register_handler("input_audio_buffer.speech_started", lambda data: handle_generic_event("input_audio_buffer.speech_started", data))
-            client.register_handler("rate_limits.updated", lambda data: handle_generic_event("rate_limits.updated", data))
-            client.register_handler("response.output_item.added", lambda data: handle_generic_event("response.output_item.added", data))
-            client.register_handler("conversation.item.created", lambda data: handle_generic_event("conversation.item.created", data))
-            client.register_handler("response.content_part.added", lambda data: handle_generic_event("response.content_part.added", data))
-            client.register_handler("response.text.done", lambda data: handle_generic_event("response.text.done", data))
-            client.register_handler("response.content_part.done", lambda data: handle_generic_event("response.content_part.done", data))
-            client.register_handler("response.output_item.done", lambda data: handle_generic_event("response.output_item.done", data))
-            client.register_handler("response.done", lambda data: handle_response_done(data))
-            client.register_handler("error", lambda data: handle_error(data))
-            client.register_handler("response.text.delta", lambda data: handle_text_delta(data))
-            client.register_handler("response.created", lambda data: handle_response_created(data))
+            # Wait a brief moment for the connection to stabilize
+            await asyncio.sleep(0.1)
             
-            openai_ready.set()  # Set ready flag after successful initialization
+            # The connection is established, mark as ready
+            asr_ready.set()
+
+            # Send any buffered chunks immediately after connection
+            if pending_audio_chunks:
+                logger.info(f"Sending {len(pending_audio_chunks)} buffered audio chunks...")
+                for chunk in pending_audio_chunks:
+                    await client.send_audio(chunk)
+                pending_audio_chunks.clear()
+                logger.info("Buffered chunks sent.")
+
             await websocket.send_text(json.dumps({
                 "type": "status",
                 "status": "connected"
             }))
             return True
         except Exception as e:
-            logger.error(f"Failed to connect to OpenAI: {e}")
-            openai_ready.clear()  # Ensure flag is cleared on failure
+            logger.error(f"Failed to connect to Tencent ASR: {e}", exc_info=True)
+            asr_ready.clear()
             await websocket.send_text(json.dumps({
                 "type": "error",
-                "content": "Failed to initialize OpenAI connection"
+                "content": "Failed to initialize Tencent ASR connection"
             }))
             return False
 
-    # Move the handler definitions here (before initialize_openai)
-    async def handle_text_delta(data):
-        try:
-            if websocket.client_state == WebSocketState.CONNECTED:
+    async def handle_asr_result(data):
+        if websocket.client_state == WebSocketState.CONNECTED:
+            text = data.get("result", {}).get("voice_text_str", "")
+            if text:
                 await websocket.send_text(json.dumps({
                     "type": "text",
-                    "content": data.get("delta", ""),
-                    "isNewResponse": False
+                    "content": text,
+                    # Tencent ASR provides the full sentence each time, so it's always a "new response" in a way
+                    "isNewResponse": True 
                 }))
-                logger.info("Handled response.text.delta")
-        except Exception as e:
-            logger.error(f"Error in handle_text_delta: {str(e)}", exc_info=True)
+                logger.info(f"Handled ASR result: {text}")
 
-    async def handle_response_created(data):
-        await websocket.send_text(json.dumps({
-            "type": "text",
-            "content": "",
-            "isNewResponse": True
-        }))
-        logger.info("Handled response.created")
+            if data.get("final") == 1:
+                logger.info("Final ASR result received.")
+                recording_stopped.set()
+                if client:
+                    await client.close()
 
-    async def handle_error(data):
-        error_msg = data.get("error", {}).get("message", "Unknown error")
-        logger.error(f"OpenAI error: {error_msg}")
+
+    async def handle_asr_error(data):
+        error_msg = data.get("message", "Unknown ASR error")
+        full_error = json.dumps(data, ensure_ascii=False)
+        logger.error(f"Tencent ASR error: {full_error}") # Log the full error object
         await websocket.send_text(json.dumps({
             "type": "error",
-            "content": error_msg
+            "content": f"ASR Error: {error_msg} (Details: {full_error})" # Send full details to frontend
         }))
-        logger.info("Handled error message from OpenAI")
 
-    async def handle_response_done(data):
-        nonlocal client
-        logger.info("Handled response.done")
-        recording_stopped.set()
-        
-        if client:
-            try:
-                await client.close()
-                client = None
-                openai_ready.clear()
-                await websocket.send_text(json.dumps({
-                    "type": "status",
-                    "status": "idle"
-                }))
-                logger.info("Connection closed after response completion")
-            except Exception as e:
-                logger.error(f"Error closing client after response done: {str(e)}")
-
-    async def handle_generic_event(event_type, data):
-        logger.info(f"Handled {event_type} with data: {json.dumps(data, ensure_ascii=False)}")
-
-    # Create a queue to handle incoming audio chunks
-    audio_queue = asyncio.Queue()
+    async def handle_asr_close(data):
+        logger.warning(f"Tencent ASR connection closed: {data.get('error')}")
+        asr_ready.clear()
+        await websocket.send_text(json.dumps({
+            "type": "status",
+            "status": "idle"
+        }))
 
     async def receive_messages():
         nonlocal client
@@ -212,179 +207,103 @@ async def websocket_endpoint(websocket: WebSocket):
         try:
             while True:
                 if websocket.client_state == WebSocketState.DISCONNECTED:
-                    logger.info("WebSocket client disconnected")
-                    openai_ready.clear()
+                    logger.info("WebSocket client disconnected, stopping receiver.")
                     break
                     
-                try:
-                    # Add timeout to prevent infinite waiting
-                    data = await asyncio.wait_for(websocket.receive(), timeout=30.0)
-                    
-                    if "bytes" in data:
-                        processed_audio = audio_processor.process_audio_chunk(data["bytes"])
-                        if not openai_ready.is_set():
-                            logger.debug("OpenAI not ready, buffering audio chunk")
-                            pending_audio_chunks.append(processed_audio)
-                        elif client:
-                            await client.send_audio(processed_audio)
-                            await websocket.send_text(json.dumps({
-                                "type": "status",
-                                "status": "connected"
-                            }))
-                            logger.debug(f"Sent audio chunk, size: {len(processed_audio)} bytes")
-                        else:
-                            logger.warning("Received audio but client is not initialized")
-                            
-                    elif "text" in data:
-                        msg = json.loads(data["text"])
+                data = await websocket.receive()
+                
+                if "bytes" in data:
+                    processed_audio = audio_processor.process_audio_chunk(data["bytes"])
+                    if asr_ready.is_set() and client:
+                        await client.send_audio(processed_audio)
+                        logger.debug(f"Sent audio chunk to Tencent ASR, size: {len(processed_audio)} bytes")
+                    else:
+                        logger.debug("ASR not ready, buffering audio chunk.")
+                        pending_audio_chunks.append(processed_audio)
                         
-                        if msg.get("type") == "start_recording":
-                            # Update status to connecting while initializing OpenAI
-                            await websocket.send_text(json.dumps({
-                                "type": "status",
-                                "status": "connecting"
-                            }))
-                            if not await initialize_openai():
-                                continue
-                            recording_stopped.clear()
-                            pending_audio_chunks.clear()
-                            
-                            # Send any buffered chunks
-                            if pending_audio_chunks and client:
-                                logger.info(f"Sending {len(pending_audio_chunks)} buffered chunks")
-                                for chunk in pending_audio_chunks:
-                                    await client.send_audio(chunk)
-                                pending_audio_chunks.clear()
-                            
-                        elif msg.get("type") == "stop_recording":
-                            if client:
-                                await client.commit_audio()
-                                await client.start_response(PROMPTS['paraphrase-gpt-realtime'])
-                                await recording_stopped.wait()
-                                # Don't close the client here, let the disconnect timer handle it
-                                # Update client status to connected (waiting for response)
-                                await websocket.send_text(json.dumps({
-                                    "type": "status",
-                                    "status": "connected"
-                                }))
+                elif "text" in data:
+                    msg = json.loads(data["text"])
+                    
+                    if msg.get("type") == "start_recording":
+                        await websocket.send_text(json.dumps({"type": "status", "status": "connecting"}))
+                        if not await initialize_asr():
+                            continue
+                        recording_stopped.clear()
+                    
+                    elif msg.get("type") == "stop_recording":
+                        logger.info("Received stop_recording message from client.")
+                        if client and asr_ready.is_set():
+                            await client.send_end_frame()
+                        recording_stopped.set()
 
-                except asyncio.TimeoutError:
-                    logger.debug("No message received for 30 seconds")
-                    continue
-                except Exception as e:
-                    logger.error(f"Error in receive_messages loop: {str(e)}", exc_info=True)
-                    break
-                
+        except websockets.exceptions.ConnectionClosed:
+            logger.info("Client WebSocket connection closed normally.")
+        except Exception as e:
+            logger.error(f"Error in receive_messages loop: {e}", exc_info=True)
         finally:
-            # Cleanup when the loop exits
             if client:
-                try:
-                    await client.close()
-                except Exception as e:
-                    logger.error(f"Error closing client in receive_messages: {str(e)}")
-            logger.info("Receive messages loop ended")
+                await client.close()
+                logger.info("Tencent ASR client connection closed in finally block.")
 
-    async def send_audio_messages():
-        while True:
-            try:
-                processed_audio = await audio_queue.get()
-                if processed_audio is None:
-                    break
-                
-                # Add validation
-                if len(processed_audio) == 0:
-                    logger.warning("Empty audio chunk received, skipping")
-                    continue
-                
-                # Append the processed audio to the buffer
-                audio_buffer.append(processed_audio)
-
-                await client.send_audio(processed_audio)
-                logger.info(f"Audio chunk sent to OpenAI client, size: {len(processed_audio)} bytes")
-                
-            except Exception as e:
-                logger.error(f"Error in send_audio_messages: {str(e)}", exc_info=True)
-                break
-
-        # After processing all audio, set the event
-        recording_stopped.set()
-
-    # Start concurrent tasks for receiving and sending
-    receive_task = asyncio.create_task(receive_messages())
-    send_task = asyncio.create_task(send_audio_messages())
-
-    try:
-        # Wait for both tasks to complete
-        await asyncio.gather(receive_task, send_task)
-    finally:
-        if client:
-            await client.close()
-            logger.info("OpenAI client connection closed")
+    await receive_messages()
+    logger.info("WebSocket connection handling finished.")
 
 @app.post(
     "/api/v1/readability",
     response_model=ReadabilityResponse,
     summary="Enhance Text Readability",
-    description="Improve the readability of the provided text using GPT-4."
+    description="Improve the readability of the provided text using DeepSeek."
 )
 async def enhance_readability(request: ReadabilityRequest):
-    prompt = PROMPTS.get('readability-enhance')
-    if not prompt:
-        raise HTTPException(status_code=500, detail="Readability prompt not found.")
-
     try:
         async def text_generator():
-            # Use gpt-4o specifically for readability
-            async for part in llm_processor.process_text(request.text, prompt, model="gpt-4o"):
-                yield part
-
+            # Use deepseek-chat specifically for readability
+            processor = get_llm_processor("deepseek-chat")
+            # Use custom prompt if provided, otherwise use default
+            prompt = request.prompt or PROMPTS['readability-enhance']
+            async for chunk in processor.process_text(request.text, prompt):
+                yield chunk
+        
         return StreamingResponse(text_generator(), media_type="text/plain")
-
     except Exception as e:
-        logger.error(f"Error enhancing readability: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Error processing readability enhancement.")
+        logger.error(f"Error in enhance_readability: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to process text for readability.")
 
 @app.post(
     "/api/v1/ask_ai",
     response_model=AskAIResponse,
     summary="Ask AI a Question",
-    description="Ask AI to provide insights using O1-mini model."
+    description="Ask AI to provide insights using DeepSeek model."
 )
 def ask_ai(request: AskAIRequest):
-    prompt = PROMPTS.get('ask-ai')
-    if not prompt:
-        raise HTTPException(status_code=500, detail="Ask AI prompt not found.")
-
     try:
-        # Use o1-mini specifically for ask_ai
-        answer = llm_processor.process_text_sync(request.text, prompt, model="o1-mini")
+        processor = get_llm_processor("deepseek-chat")
+        answer = processor.process_text_sync(request.text, PROMPTS['paraphrase-gpt-realtime'])
         return AskAIResponse(answer=answer)
     except Exception as e:
-        logger.error(f"Error processing AI question: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Error processing AI question.")
+        logger.error(f"Error in ask_ai: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to get answer from AI.")
 
 @app.post(
     "/api/v1/correctness",
     response_model=CorrectnessResponse,
-    summary="Check Factual Correctness",
-    description="Analyze the text for factual accuracy using GPT-4o."
+    summary="一句话要点",
+    description="生成约30-60字的一句话总结。"
 )
 async def check_correctness(request: CorrectnessRequest):
-    prompt = PROMPTS.get('correctness-check')
-    if not prompt:
-        raise HTTPException(status_code=500, detail="Correctness prompt not found.")
-
     try:
         async def text_generator():
-            # Specifically use gpt-4o for correctness checking
-            async for part in llm_processor.process_text(request.text, prompt, model="gpt-4o"):
-                yield part
+            # Specifically use deepseek-chat for correctness checking
+            processor = get_llm_processor("deepseek-chat")
+            # Use custom prompt if provided, otherwise use default
+            prompt = request.prompt or PROMPTS['correctness-check']
+            async for chunk in processor.process_text(request.text, prompt):
+                yield chunk
 
         return StreamingResponse(text_generator(), media_type="text/plain")
-
     except Exception as e:
-        logger.error(f"Error checking correctness: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Error processing correctness check.")
+        logger.error(f"Error in check_correctness: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to生成一句话要点。")
 
 if __name__ == '__main__':
-    uvicorn.run(app, host="0.0.0.0", port=3005)
+    uvicorn.run(app, host="0.0.0.0", port=3006)

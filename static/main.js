@@ -15,8 +15,14 @@ const enhancedTranscript = document.getElementById('enhancedTranscript');
 const copyButton = document.getElementById('copyButton');
 const copyEnhancedButton = document.getElementById('copyEnhancedButton');
 const readabilityButton = document.getElementById('readabilityButton');
-const askAIButton = document.getElementById('askAIButton');
 const correctnessButton = document.getElementById('correctnessButton');
+const settingsButton = document.getElementById('settingsButton');
+const settingsModal = document.getElementById('settingsModal');
+const closeSettings = document.getElementById('closeSettings');
+const saveSettings = document.getElementById('saveSettings');
+const resetPrompts = document.getElementById('resetPrompts');
+const readabilityPrompt = document.getElementById('readabilityPrompt');
+const correctnessPrompt = document.getElementById('correctnessPrompt');
 
 // Configuration
 const targetSeconds = 5;
@@ -148,7 +154,6 @@ function initializeWebSocket() {
             case 'text':
                 if (data.isNewResponse) {
                     transcript.value = data.content;
-                    stopTimer();
                 } else {
                     transcript.value += data.content;
                 }
@@ -195,7 +200,6 @@ async function startRecording() {
         await ws.send(JSON.stringify({ type: 'start_recording' }));
         
         startTimer();
-        recordButton.textContent = 'Stop';
         recordButton.classList.add('recording');
         
     } catch (error) {
@@ -208,7 +212,7 @@ async function stopRecording() {
     if (!isRecording) return;
     
     isRecording = false;
-    startTimer();
+    stopTimer();
     
     if (audioBuffer.length > 0 && ws.readyState === WebSocket.OPEN) {
         ws.send(audioBuffer.buffer);
@@ -218,7 +222,6 @@ async function stopRecording() {
     await new Promise(resolve => setTimeout(resolve, 500));
     await ws.send(JSON.stringify({ type: 'stop_recording' }));
     
-    recordButton.textContent = 'Start';
     recordButton.classList.remove('recording');
 }
 
@@ -238,10 +241,61 @@ document.addEventListener('keydown', (event) => {
     }
 });
 
+// Settings management
+function loadPrompts() {
+    const defaultReadabilityPrompt = "这是一个语音转文字的文本，可能有识别不清和语义不明。请你理解文字背后的意思和意图，并对文本进行优化，使其更加清晰易读，结构明确。注意，保持原意不变，不用写你的整理思路和建议，直接输出你的整理结果，不要有任何其他多余的内容，比如“以下是整理后的内容”类似这种多余的话：";
+    const defaultCorrectnessPrompt = "这是一个语音转文字的文本，可能有识别不清和语义不明。请你理解文字背后的意思和意图，并对文本进行一句话总结，大约30-60字，你自己把握，要求精炼要点。注意，保持原意不变，不用写你的整理思路和建议，直接输出你的整理结果，不要有任何其他多余的内容：";
+    
+    readabilityPrompt.value = localStorage.getItem('readabilityPrompt') || defaultReadabilityPrompt;
+    correctnessPrompt.value = localStorage.getItem('correctnessPrompt') || defaultCorrectnessPrompt;
+}
+
+function savePrompts() {
+    localStorage.setItem('readabilityPrompt', readabilityPrompt.value);
+    localStorage.setItem('correctnessPrompt', correctnessPrompt.value);
+}
+
+function resetPromptsToDefault() {
+    const defaultReadabilityPrompt = "这是一个语音转文字的文本，可能有识别不清和语义不明。请你理解文字背后的意思和意图，并对文本进行优化，使其更加清晰易读，结构明确。注意，保持原意不变，不用写你的整理思路和建议，直接输出你的整理结果，不要有任何其他多余的内容，比如“以下是整理后的内容”类似这种多余的话：";
+    const defaultCorrectnessPrompt = "这是一个语音转文字的文本，可能有识别不清和语义不明。请你理解文字背后的意思和意图，并对文本进行一句话总结，大约30-60字，你自己把握，要求精炼要点。注意，保持原意不变，不用写你的整理思路和建议，直接输出你的整理结果，不要有任何其他多余的内容：";
+    
+    readabilityPrompt.value = defaultReadabilityPrompt;
+    correctnessPrompt.value = defaultCorrectnessPrompt;
+}
+
+// Settings modal handlers
+settingsButton.onclick = () => {
+    settingsModal.style.display = 'flex';
+    loadPrompts();
+};
+
+closeSettings.onclick = () => {
+    settingsModal.style.display = 'none';
+};
+
+saveSettings.onclick = () => {
+    savePrompts();
+    settingsModal.style.display = 'none';
+    showCopiedFeedback(saveSettings, '已保存！');
+};
+
+resetPrompts.onclick = () => {
+    resetPromptsToDefault();
+    showCopiedFeedback(resetPrompts, '已重置！');
+};
+
+// Close modal when clicking outside
+settingsModal.onclick = (e) => {
+    if (e.target === settingsModal) {
+        settingsModal.style.display = 'none';
+    }
+};
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     initializeWebSocket();
     initializeTheme();
+    loadPrompts();
     if (autoStart) initializeAudioStream();
 });
 // Readability and AI handlers
@@ -255,10 +309,14 @@ readabilityButton.onclick = async () => {
     }
 
     try {
+        const customPrompt = localStorage.getItem('readabilityPrompt') || "这是一个语音转文字的文本，可能有识别不清和语义不明。请你理解文字背后的意思和意图，并对文本进行优化，使其更加清晰易读，结构明确。注意，保持原意不变，不用写你的整理思路和建议，直接输出你的整理结果，不要有任何其他多余的内容，比如“以下是整理后的内容”类似这种多余的话：";
         const response = await fetch('/api/v1/readability', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: inputText })
+            body: JSON.stringify({ 
+                text: inputText,
+                prompt: customPrompt
+            })
         });
 
         if (!response.ok) throw new Error('Readability enhancement failed');
@@ -285,53 +343,29 @@ readabilityButton.onclick = async () => {
     }
 };
 
-askAIButton.onclick = async () => {
-    startTimer();
-    const inputText = transcript.value.trim();
-    if (!inputText) {
-        alert('Please enter text to ask AI about.');
-        stopTimer();
-        return;
-    }
 
-    try {
-        const response = await fetch('/api/v1/ask_ai', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: inputText })
-        });
-
-        if (!response.ok) throw new Error('AI request failed');
-
-        const result = await response.json();
-        enhancedTranscript.value = result.answer;
-        if (!isMobileDevice()) copyToClipboard(result.answer, copyEnhancedButton);
-        stopTimer();
-
-    } catch (error) {
-        console.error('Error:', error);
-        alert('Error asking AI');
-        stopTimer();
-    }
-};
 
 correctnessButton.onclick = async () => {
     startTimer();
     const inputText = transcript.value.trim();
     if (!inputText) {
-        alert('Please enter text to check for correctness.');
+        alert('请输入文本以生成一句话要点。');
         stopTimer();
         return;
     }
 
     try {
+        const customPrompt = localStorage.getItem('correctnessPrompt') || "这是一个语音转文字的文本，可能有识别不清和语义不明。请你理解文字背后的意思和意图，并对文本进行一句话总结，大约30-60字，你自己把握，要求精炼要点。注意，保持原意不变，不用写你的整理思路和建议，直接输出你的整理结果，不要有任何其他多余的内容：";
         const response = await fetch('/api/v1/correctness', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: inputText })
+            body: JSON.stringify({ 
+                text: inputText,
+                prompt: customPrompt
+            })
         });
 
-        if (!response.ok) throw new Error('Correctness check failed');
+        if (!response.ok) throw new Error('生成一句话要点失败');
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -350,7 +384,7 @@ correctnessButton.onclick = async () => {
 
     } catch (error) {
         console.error('Error:', error);
-        alert('Error checking correctness');
+        alert('生成一句话要点时发生错误');
         stopTimer();
     }
 };

@@ -1,3 +1,58 @@
-*.sh
-.windsurfrules
+# ===== Brainwave 项目 .gitignore =====
+
+# API密钥和敏感信息
+.env
+.env.*
+!.env.example
+!env.template
+
+# 本地配置文件
+*.local
+local_settings.py
+config.local.*
+
+# Python相关
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# IDE和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 日志文件
+*.log
+logs/
+
+# 临时文件和缓存
+*.tmp
+*.temp
+.cache/
+
+# 音频测试文件
+*.wav
+*.mp3
+*.flac
+test_audio/
+
+# 开发文档
 scratchpad.md
+TODO.md
+NOTES.md
+
+# Cursor相关
+.windsurfrules
+cursor_.md
+MIGRATION_PLAN.md

@@ -1,31 +1,63 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Brainwave</title>
+    <title>语音整理助手</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" type="text/css" href="static/style.css">
 </head>
 <body>
     <div class="container">
         <div id="connectionStatus" class="connection-status"></div>
-        <button id="themeToggle" class="theme-toggle">🌙</button>
-        <h1>Brainwave</h1>
+        <div class="header-controls">
+            <button id="themeToggle" class="theme-toggle">🌙</button>
+            <button id="settingsButton" class="settings-button">⚙️</button>
+        </div>
+        <div class="title-section">
+            <div class="logo">🎙️</div>
+            <h1>语音整理小助手</h1>
+        </div>
         <div id="timer" style="text-align: center; margin-bottom: 15px; font-size: 1.2rem;">00:00</div>
-        <button id="recordButton">Start</button>
-        <div class="transcript-container">
-            <textarea id="transcript"></textarea>
-            <button id="copyButton" class="copy-button">Copy</button>
-        </div>
+        <button id="recordButton" aria-label="Start Recording"></button>
         <div class="button-container">
-            <button id="readabilityButton" class="action-button">Readability</button>
-            <button id="correctnessButton" class="action-button">Correctness</button>
-            <button id="askAIButton" class="action-button">Ask AI</button>
+            <button id="readabilityButton" class="action-button">可读性整理</button>
+            <button id="correctnessButton" class="action-button">一句话要点</button>
         </div>
-        <div class="enhanced-transcript-container">
-            <textarea id="enhancedTranscript"></textarea>
-            <button id="copyEnhancedButton" class="copy-button">Copy</button>
+        <div class="main-content">
+            <div class="transcript-container">
+                <textarea id="transcript" placeholder="实时转录原文将显示在这里..."></textarea>
+                <button id="copyButton" class="copy-button">Copy</button>
+            </div>
+            <div class="enhanced-transcript-container">
+                <textarea id="enhancedTranscript" placeholder="AI 结构化整理后的内容将显示在这里..."></textarea>
+                <button id="copyEnhancedButton" class="copy-button">Copy</button>
+            </div>
         </div>
     </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="settings-modal">
+        <div class="settings-content">
+            <div class="settings-header">
+                <h2>设置</h2>
+                <button id="closeSettings" class="close-button">×</button>
+            </div>
+            <div class="settings-body">
+                <div class="setting-group">
+                    <label for="readabilityPrompt">可读性整理提示词：</label>
+                    <textarea id="readabilityPrompt" placeholder="请输入用于文本可读性优化的提示词..."></textarea>
+                </div>
+                <div class="setting-group">
+                    <label for="correctnessPrompt">一句话要点提示词：</label>
+                    <textarea id="correctnessPrompt" placeholder="请输入用于生成一句话要点的提示词..."></textarea>
+                </div>
+            </div>
+            <div class="settings-footer">
+                <button id="resetPrompts" class="secondary-button">重置默认</button>
+                <button id="saveSettings" class="primary-button">保存设置</button>
+            </div>
+        </div>
+    </div>
+
     <script src="static/main.js"></script>
 </body>
 </html>
