@@ -44,8 +44,8 @@ Frontend (静态文件)          Backend (FastAPI)           第三方服务
 ### 1️⃣ **克隆项目**
 
    ```bash
-git clone https://github.com/your-username/brainwave.git
-   cd brainwave
+git clone https://github.com/Squareczm/STTstructured/
+   cd STTstructured
    ```
 
 ### 2️⃣ **安装依赖**
