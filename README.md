@@ -127,7 +127,7 @@ python realtime_server.py
 ## 📝 项目结构
 
 ```
-brainwave/
+STTStructured/
 ├── 📄 realtime_server.py      # FastAPI后端服务器
 ├── 📄 llm_processor.py        # DeepSeek AI处理器
 ├── 📄 tencent_asr_client.py   # 腾讯云ASR客户端
@@ -172,7 +172,7 @@ brainwave/
 ### Docker部署
    ```bash
 # 构建镜像
-docker build -t brainwave .
+docker build -t STTstructured .
 
 # 运行容器
 docker run -d \
